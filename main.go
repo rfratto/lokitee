@@ -50,12 +50,17 @@ func main() {
 		abort("error: could not parse -labels: %s", err)
 	}
 
+	input, err := argsOrStdin(fs)
+	if err != nil {
+		abort("error: could not get input: %s", err)
+	}
+
 	pushReq := pushRequest{
 		Streams: []pushStream{{
 			Stream: labels.Map(),
 			Values: [][]string{{
 				fmt.Sprintf("%d", time.Now().UnixNano()),
-				strings.Join(fs.Args(), " "),
+				input,
 			}},
 		}},
 	}
@@ -91,6 +96,18 @@ func main() {
 		bb, _ := io.ReadAll(resp.Body)
 		abort("error: response %s from loki: %s", resp.Status, string(bb))
 	}
+}
+
+func argsOrStdin(fs *flag.FlagSet) (string, error) {
+	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice == 0 {
+		bb, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", err
+		}
+		return string(bb), nil
+	}
+
+	return strings.Join(fs.Args(), ` `), nil
 }
 
 func abort(msg string, args ...interface{}) {
