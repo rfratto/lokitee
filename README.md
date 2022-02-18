@@ -11,6 +11,14 @@ Credentials to Loki can be set via flag or environment variable:
 By default, sent logs are written with the label set `{job="lokiecho"}`. This
 can be changed with the `-labels` flag.
 
+## Installing
+
+Use Go to install:
+
+```
+go install github.com/rfratto/lokiecho@main
+```
+
 ## Examples
 
 Write `Hello, world` to Loki:
