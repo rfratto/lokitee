@@ -1,6 +1,6 @@
-# lokiecho
+# lokitee
 
-`lokiecho` lets you pass arguments or the contents of stdin to Loki.
+`lokitee` lets you tee arguments or the contents of stdin to Loki.
 
 Credentials to Loki can be set via flag or environment variable:
 
@@ -8,7 +8,7 @@ Credentials to Loki can be set via flag or environment variable:
 * `-username` or `$LOKI_USERNAME`: Basic auth username to use for requests. Optional.
 * `-password` or `$LOKI_PASSWORD`: Basic auth password to use for requests. Optional.
 
-By default, sent logs are written with the label set `{job="lokiecho"}`. This
+By default, sent logs are written with the label set `{job="lokitee"}`. This
 can be changed with the `-labels` flag.
 
 ## Installing
@@ -16,7 +16,7 @@ can be changed with the `-labels` flag.
 Use Go to install:
 
 ```
-go install github.com/rfratto/lokiecho@main
+go install github.com/rfratto/lokitee@main
 ```
 
 ## Examples
@@ -24,15 +24,15 @@ go install github.com/rfratto/lokiecho@main
 Write `Hello, world` to Loki:
 
 ```
-lokiecho Hello, world
+lokitee Hello, world
 ```
 
 Pipe the output of `cat main.go` to Loki:
 
 ```
-cat main.go | lokiecho
+cat main.go | lokitee
 ```
 
 ## Gotcha
 
-`lokiecho` has no retry logic if a request to Loki fails.
+`lokitee` has no retry logic if a request to Loki fails.

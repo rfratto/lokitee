@@ -1,4 +1,4 @@
-module github.com/rfratto/lokiecho
+module github.com/rfratto/lokitee
 
 go 1.17
 

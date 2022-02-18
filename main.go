@@ -28,7 +28,7 @@ func main() {
 	fs.StringVar(&lokiUrl, "addr", "", "Server address. Defaults to $LOKI_ADDR if not set.")
 	fs.StringVar(&username, "username", "", "Username for basic auth. Defaults to $LOKI_USERNAME if not set.")
 	fs.StringVar(&password, "password", "", "Password for basic auth. Defaults to $LOKI_PASSWORD if not set.")
-	fs.StringVar(&rawLabels, "labels", `{job="lokiecho"}`, `Labels to inject for logs. i.e., {app="shell"}`)
+	fs.StringVar(&rawLabels, "labels", `{job="lokitee"}`, `Labels to inject for logs. i.e., {app="shell"}`)
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		abort("error: could not parse flags: %s", err)
@@ -96,6 +96,8 @@ func main() {
 		bb, _ := io.ReadAll(resp.Body)
 		abort("error: response %s from loki: %s", resp.Status, string(bb))
 	}
+
+	fmt.Println(input)
 }
 
 func argsOrStdin(fs *flag.FlagSet) (string, error) {
