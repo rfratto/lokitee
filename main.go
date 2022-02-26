@@ -1,18 +1,25 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
-	"strings"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/backoff"
+	"github.com/grafana/dskit/flagext"
+	"github.com/grafana/loki/clients/pkg/promtail/api"
+	"github.com/grafana/loki/clients/pkg/promtail/client"
+	"github.com/grafana/loki/pkg/logproto"
+	"github.com/prometheus/common/config"
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 )
 
@@ -50,66 +57,96 @@ func main() {
 		abort("error: could not parse -labels: %s", err)
 	}
 
-	input, err := argsOrStdin(fs)
-	if err != nil {
-		abort("error: could not get input: %s", err)
-	}
-
-	pushReq := pushRequest{
-		Streams: []pushStream{{
-			Stream: labels.Map(),
-			Values: [][]string{{
-				fmt.Sprintf("%d", time.Now().UnixNano()),
-				input,
-			}},
-		}},
-	}
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	if err := enc.Encode(&pushReq); err != nil {
-		abort("error: could not build request: %s", err)
-	}
-
 	parsedUrl, err := url.Parse(lokiUrl)
 	if err != nil {
 		abort("error: invalid url %s: %s", lokiUrl, err)
 	}
 	parsedUrl.Path = path.Join(parsedUrl.Path, "/loki/api/v1/push")
 
-	req, err := http.NewRequest(http.MethodPost, parsedUrl.String(), bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		abort("error: invalid http request: %s", err)
+	// We want to stream logs from stdin to both Loki and stdout. To write to
+	// Loki as efficiently as possible, we create a Promtail client and rely on
+	// its native support for batching.
+
+	// Data sent to the Promtail client is handled in the background, and errors
+	// are only exposed via logger; create a logger for Promtail to report errors
+	// to.
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	logger = log.With(logger, "program", "lokitee")
+	logger = level.NewFilter(logger, level.AllowError())
+
+	cliConfig := client.Config{
+		URL:       flagext.URLValue{URL: parsedUrl},
+		BatchWait: client.BatchWait,
+		BatchSize: client.BatchSize,
+
+		BackoffConfig: backoff.Config{
+			MinBackoff: client.MinBackoff,
+			MaxBackoff: client.MaxBackoff,
+			MaxRetries: client.MaxRetries,
+		},
+
+		Timeout:  client.Timeout,
+		TenantID: "", // TODO(rfratto): make configurable
 	}
 	if username != "" || password != "" {
-		req.SetBasicAuth(username, password)
+		// TODO(rfratto): configure other types of credentials (eg Bearer auth)?
+		cliConfig.Client = config.HTTPClientConfig{
+			BasicAuth: &config.BasicAuth{
+				Username: username,
+				Password: config.Secret(password),
+			},
+		}
 	}
-	req.Header.Add("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
+	cli, err := client.New(nil, cliConfig, logger)
 	if err != nil {
-		abort("error: failed to perform http request: %s", err)
+		abort("error: creating promtail client: %s", err)
 	}
-	defer resp.Body.Close()
+	defer cli.Stop()
 
-	if resp.StatusCode/100 != 2 {
-		bb, _ := io.ReadAll(resp.Body)
-		abort("error: response %s from loki: %s", resp.Status, string(bb))
+	lw := promtailWriter{
+		labels: toLabelSet(labels),
+		write:  cli.Chan(),
 	}
+	mw := io.MultiWriter(os.Stdout, &lw) // Tee to stdout and our promtail client
 
-	fmt.Println(input)
+	// Scan over stdin and send every line to Loki.
+	//
+	// TODO(rfratto): should teeing work another way? What if the user doesn't
+	// want to send each read line as an individual log?
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		_, err := fmt.Fprintln(mw, scanner.Text())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed writing: %w", err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		abort(err.Error())
+	}
 }
 
-func argsOrStdin(fs *flag.FlagSet) (string, error) {
-	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice == 0 {
-		bb, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", err
-		}
-		return string(bb), nil
+func toLabelSet(in labels.Labels) model.LabelSet {
+	res := make(model.LabelSet, len(in))
+	for _, pair := range in {
+		res[model.LabelName(pair.Name)] = model.LabelValue(pair.Value)
 	}
+	return res
+}
 
-	return strings.Join(fs.Args(), ` `), nil
+type promtailWriter struct {
+	labels model.LabelSet
+	write  chan<- api.Entry
+}
+
+func (lw *promtailWriter) Write(bb []byte) (int, error) {
+	lw.write <- api.Entry{
+		Labels: lw.labels,
+		Entry: logproto.Entry{
+			Timestamp: time.Now().UTC(),
+			Line:      string(bb),
+		},
+	}
+	return len(bb), nil
 }
 
 func abort(msg string, args ...interface{}) {
@@ -122,13 +159,4 @@ func stringOrDefault(value string, def string) string {
 		return value
 	}
 	return def
-}
-
-type pushRequest struct {
-	Streams []pushStream `json:"streams"`
-}
-
-type pushStream struct {
-	Stream map[string]string `json:"stream"`
-	Values [][]string        `json:"values"`
 }

@@ -1,6 +1,7 @@
 # lokitee
 
-`lokitee` lets you tee arguments or the contents of stdin to Loki.
+`lokitee` streams lines of text from stdin, forwarding it to stdout and to
+Grafana Loki.
 
 Credentials to Loki can be set via flag or environment variable:
 
@@ -24,15 +25,5 @@ go install github.com/rfratto/lokitee@main
 Write `Hello, world` to Loki:
 
 ```
-lokitee Hello, world
+echo "Hello, world!" | lokitee
 ```
-
-Pipe the output of `cat main.go` to Loki:
-
-```
-cat main.go | lokitee
-```
-
-## Gotcha
-
-`lokitee` has no retry logic if a request to Loki fails.
