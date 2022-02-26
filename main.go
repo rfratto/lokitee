@@ -107,7 +107,10 @@ func main() {
 		labels: toLabelSet(labels),
 		write:  cli.Chan(),
 	}
-	mw := io.MultiWriter(os.Stdout, &lw) // Tee to stdout and our promtail client
+
+	// Tee to stdout and our promtail client. We wrap stdout in a lineWriter so
+	// newlines are re-injected just for terminal output.
+	mw := io.MultiWriter(&lineWriter{next: os.Stdout}, &lw)
 
 	// Scan over stdin and send every line to Loki.
 	//
@@ -115,7 +118,7 @@ func main() {
 	// want to send each read line as an individual log?
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		_, err := fmt.Fprintln(mw, scanner.Text())
+		_, err := fmt.Fprint(mw, scanner.Text())
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "failed writing: %w", err)
 		}
@@ -147,6 +150,16 @@ func (lw *promtailWriter) Write(bb []byte) (int, error) {
 		},
 	}
 	return len(bb), nil
+}
+
+type lineWriter struct {
+	next io.Writer
+}
+
+func (lw lineWriter) Write(bb []byte) (int, error) {
+	n, err := lw.next.Write(bb)
+	_, _ = lw.next.Write([]byte{'\n'})
+	return n, err
 }
 
 func abort(msg string, args ...interface{}) {
