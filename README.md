@@ -27,3 +27,8 @@ Write `Hello, world` to Loki:
 ```
 echo "Hello, world!" | lokitee
 ```
+
+## Gotchas
+
+`lokitee` currently splits lines from stdin and sends each line to Loki,
+preventing you from having one log entry that spans multiple lines.
