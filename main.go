@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"time"
 
@@ -25,10 +26,11 @@ import (
 
 func main() {
 	var (
-		lokiUrl   string
-		username  string
-		password  string
-		rawLabels string
+		lokiUrl       string
+		username      string
+		password      string
+		rawLabels     string
+		interruptWait time.Duration
 	)
 
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -36,10 +38,20 @@ func main() {
 	fs.StringVar(&username, "username", "", "Username for basic auth. Defaults to $LOKI_USERNAME if not set.")
 	fs.StringVar(&password, "password", "", "Password for basic auth. Defaults to $LOKI_PASSWORD if not set.")
 	fs.StringVar(&rawLabels, "labels", `{job="lokitee"}`, `Labels to inject for logs. i.e., {app="shell"}`)
+	fs.DurationVar(&interruptWait, "interrupt-wait", time.Duration(0), "Number of seconds to delay exiting if sending an interrupt signal like SIGTERM is sent")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		abort("error: could not parse flags: %s", err)
 	}
+
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		<-c
+
+		time.Sleep(interruptWait)
+		os.Exit(0)
+	}()
 
 	lokiUrl = stringOrDefault(lokiUrl, os.Getenv("LOKI_ADDR"))
 	username = stringOrDefault(username, os.Getenv("LOKI_USERNAME"))
