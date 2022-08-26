@@ -30,6 +30,7 @@ func main() {
 		username      string
 		password      string
 		rawLabels     string
+		rawTimestamp  string
 		interruptWait time.Duration
 	)
 
@@ -38,6 +39,7 @@ func main() {
 	fs.StringVar(&username, "username", "", "Username for basic auth. Defaults to $LOKI_USERNAME if not set.")
 	fs.StringVar(&password, "password", "", "Password for basic auth. Defaults to $LOKI_PASSWORD if not set.")
 	fs.StringVar(&rawLabels, "labels", `{job="lokitee"}`, `Labels to inject for logs. i.e., {app="shell"}`)
+	fs.StringVar(&rawTimestamp, "offset-timestamp", "", "Choose a timestamp for the first entry in RFC3339 format, this is used as an offset from the current time for subsequent entries")
 	fs.DurationVar(&interruptWait, "interrupt-wait", time.Duration(0), "Number of seconds to delay exiting if sending an interrupt signal like SIGTERM is sent")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -120,6 +122,18 @@ func main() {
 		write:  cli.Chan(),
 	}
 
+	if rawTimestamp != "" {
+		t, err := time.Parse(time.RFC3339Nano, rawTimestamp)
+		if err != nil {
+			abort("error: failed to parse offset-timestamp as RFC3339: %s", err)
+		}
+		if t.After(time.Now()) {
+			abort("error: offset-timestamp must be in the past")
+		}
+		off := time.Now().Sub(t)
+		lw.offset = &off
+	}
+
 	// Tee to stdout and our promtail client. We wrap stdout in a lineWriter so
 	// newlines are re-injected just for terminal output.
 	mw := io.MultiWriter(&lineWriter{next: os.Stdout}, &lw)
@@ -151,13 +165,20 @@ func toLabelSet(in labels.Labels) model.LabelSet {
 type promtailWriter struct {
 	labels model.LabelSet
 	write  chan<- api.Entry
+	offset *time.Duration
 }
 
 func (lw *promtailWriter) Write(bb []byte) (int, error) {
+	var t time.Time
+	if lw.offset != nil {
+		t = time.Now().Add(-*lw.offset)
+	} else {
+		t = time.Now()
+	}
 	lw.write <- api.Entry{
 		Labels: lw.labels,
 		Entry: logproto.Entry{
-			Timestamp: time.Now().UTC(),
+			Timestamp: t.UTC(),
 			Line:      string(bb),
 		},
 	}
